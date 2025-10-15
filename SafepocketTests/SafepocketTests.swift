@@ -1,17 +1,27 @@
-//
-//  SafepocketTests.swift
-//  SafepocketTests
-//
-//  Created by 鈴木翔太 on 2025/10/14.
-//
-
+import Foundation
 import Testing
 @testable import Safepocket
 
 struct SafepocketTests {
 
-    @Test func example() async throws {
-        // Write your test here and use APIs like `#expect(...)` to check expected conditions.
-    }
+    @MainActor
+    @Test("Account list loads mock accounts")
+    func accountListLoadsMockAccounts() async throws {
+        let sessionController = AppSessionController(sessionStore: InMemorySessionStore())
+        sessionController.apply(
+            session: AuthSession(
+                accessToken: "mock-access-token",
+                refreshToken: "mock-refresh-token",
+                idToken: nil,
+                expiresAt: Date().addingTimeInterval(3600),
+                userId: "test-user-id",
+                tokenType: "Bearer"
+            )
+        )
 
+        let viewModel = AccountListViewModel(apiClient: MockApiClient(), sessionController: sessionController)
+        await viewModel.loadAccounts()
+
+        #expect(viewModel.accounts == Account.previewAccounts)
+    }
 }
