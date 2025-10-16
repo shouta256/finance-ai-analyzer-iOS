@@ -1,3 +1,4 @@
+#if DEBUG
 import Foundation
 
 struct MockApiClient: ApiClient {
@@ -42,3 +43,4 @@ struct MockApiClient: ApiClient {
         return Account.previewAccounts
     }
 }
+#endif

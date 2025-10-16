@@ -4,39 +4,57 @@ struct ContentView: View {
     @EnvironmentObject private var sessionController: AppSessionController
     private let apiClient: ApiClient
     private let authService: AuthService
+    private let dashboardService: any DashboardService
+    private let aiService: any AIService
 
-    init(apiClient: ApiClient, authService: AuthService) {
+    init(
+        apiClient: ApiClient,
+        authService: AuthService,
+        dashboardService: any DashboardService = DemoDashboardService(),
+        aiService: any AIService = DemoAIService()
+    ) {
         self.apiClient = apiClient
         self.authService = authService
+        self.dashboardService = dashboardService
+        self.aiService = aiService
     }
 
     var body: some View {
-        NavigationStack {
+        Group {
             if sessionController.session == nil || sessionController.session?.isExpired == true {
-                LoginView(
-                    viewModel: LoginViewModel(
-                        authService: authService,
-                        sessionController: sessionController
+                NavigationStack {
+                    LoginView(
+                        viewModel: LoginViewModel(
+                            authService: authService,
+                            sessionController: sessionController
+                        )
                     )
-                )
+                }
             } else {
-                AccountListView(
-                    viewModel: AccountListViewModel(
-                        apiClient: apiClient,
-                        sessionController: sessionController
-                    )
+                AuthenticatedHomeView(
+                    apiClient: apiClient,
+                    dashboardService: dashboardService,
+                    aiService: aiService
                 )
+                .environmentObject(sessionController)
             }
         }
         .animation(.easeInOut, value: sessionController.session != nil)
     }
 }
 
+#if DEBUG
 #Preview {
     let sessionController = AppSessionController(sessionStore: InMemorySessionStore())
-    return ContentView(apiClient: MockApiClient(), authService: PreviewAuthService())
+    return ContentView(
+        apiClient: MockApiClient(),
+        authService: PreviewAuthService(),
+        dashboardService: DemoDashboardService(),
+        aiService: DemoAIService()
+    )
         .environmentObject(sessionController)
 }
+#endif
 
 @MainActor
 private final class PreviewAuthService: AuthService {
@@ -49,5 +67,68 @@ private final class PreviewAuthService: AuthService {
             userId: "preview-user-id",
             tokenType: "Bearer"
         )
+    }
+}
+
+private struct AuthenticatedHomeView: View {
+    @EnvironmentObject private var sessionController: AppSessionController
+    private let apiClient: ApiClient
+    private let dashboardService: any DashboardService
+    private let aiService: any AIService
+
+    init(
+        apiClient: ApiClient,
+        dashboardService: any DashboardService,
+        aiService: any AIService
+    ) {
+        self.apiClient = apiClient
+        self.dashboardService = dashboardService
+        self.aiService = aiService
+    }
+
+    var body: some View {
+        TabView {
+            NavigationStack {
+                DashboardView(
+                    viewModel: DashboardViewModel(
+                        dashboardService: dashboardService,
+                        sessionController: sessionController
+                    ),
+                    summaryViewModel: AISummaryViewModel(
+                        prompt: "何に一番お金使ってる？",
+                        aiService: aiService,
+                        sessionController: sessionController
+                    )
+                )
+            }
+            .tabItem {
+                Label("Overview", systemImage: "chart.pie.fill")
+            }
+
+            NavigationStack {
+                AccountListView(
+                    viewModel: AccountListViewModel(
+                        apiClient: apiClient,
+                        sessionController: sessionController
+                    )
+                )
+            }
+            .tabItem {
+                Label("Accounts", systemImage: "creditcard.fill")
+            }
+
+            NavigationStack {
+                AIChatView(
+                    viewModel: AIChatViewModel(
+                        aiService: aiService,
+                        sessionController: sessionController
+                    )
+                )
+            }
+            .tabItem {
+                Label("AI Chat", systemImage: "bubble.left.and.bubble.right.fill")
+            }
+        }
+        .tint(.indigo)
     }
 }

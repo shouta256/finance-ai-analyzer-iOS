@@ -99,9 +99,9 @@ struct RemoteApiClient: ApiClient {
         let data = try await perform(request: request, expectingStatus: 200)
         let response = try decoder.decode(Response.self, from: data)
         let expiresAt = Date().addingTimeInterval(response.expiresIn)
-        #if DEBUG
-        print("[HTTP] /api/auth/token success. Access token received (hidden). expiresIn=\(response.expiresIn)s")
-        #endif
+    #if DEBUG
+    print("[HTTP] /api/auth/token success. Access token received (hidden). expiresIn=\(response.expiresIn)s")
+    #endif
         return AuthSession(
             accessToken: response.accessToken,
             refreshToken: response.refreshToken,
@@ -245,15 +245,21 @@ struct RemoteApiClient: ApiClient {
         if let errorResponse = try? decoder.decode(ApiErrorResponse.self, from: data) {
             let message = "[HTTP \(statusCode)] \(request.httpMethod ?? "") \(request.url?.absoluteString ?? "-" )\ncode: \(errorResponse.error.code)\nmessage: \(errorResponse.error.message)\ntraceId: \(errorResponse.traceId)"
             logger.error("\(message, privacy: .public)")
+            #if DEBUG
             print(message)
+            #endif
         } else if let body = String(data: data, encoding: .utf8), !body.isEmpty {
             let message = "[HTTP \(statusCode)] \(request.httpMethod ?? "") \(request.url?.absoluteString ?? "-")\nraw body: \(body)"
             logger.error("\(message, privacy: .public)")
+            #if DEBUG
             print(message)
+            #endif
         } else {
             let message = "[HTTP \(statusCode)] \(request.httpMethod ?? "") \(request.url?.absoluteString ?? "-") (no readable body)"
             logger.error("\(message, privacy: .public)")
+            #if DEBUG
             print(message)
+            #endif
         }
     }
 }

@@ -81,7 +81,7 @@ private struct AccountRow: View {
         VStack(alignment: .leading, spacing: 4) {
             Text(account.name)
                 .font(.headline)
-            Text(account.bankName)
+            Text(account.institution)
                 .font(.caption)
                 .foregroundStyle(.secondary)
             Text(CurrencyFormatter.string(from: account.balance, currencyCode: account.currency))
@@ -93,6 +93,7 @@ private struct AccountRow: View {
     }
 }
 
+#if DEBUG
 #Preview {
     let sessionController = AppSessionController(sessionStore: InMemorySessionStore())
     sessionController.apply(
@@ -116,3 +117,4 @@ private struct AccountRow: View {
     }
     .environmentObject(sessionController)
 }
+#endif

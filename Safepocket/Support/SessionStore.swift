@@ -5,9 +5,11 @@ protocol SessionStore: AnyObject {
     var session: AuthSession? { get set }
 }
 
+#if DEBUG
 final class InMemorySessionStore: SessionStore {
     var session: AuthSession?
 }
+#endif
 
 final class KeychainSessionStore: SessionStore {
     private let service = "shoutaSuzuki.Safepocket.auth"

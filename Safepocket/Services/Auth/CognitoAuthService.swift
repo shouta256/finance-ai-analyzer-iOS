@@ -134,7 +134,7 @@ final class CognitoAuthService: NSObject, AuthService {
 }
 
 extension CognitoAuthService: ASWebAuthenticationPresentationContextProviding {
-    nonisolated func presentationAnchor(for session: ASWebAuthenticationSession) -> ASPresentationAnchor {
+    func presentationAnchor(for session: ASWebAuthenticationSession) -> ASPresentationAnchor {
         guard let windowScene = UIApplication.shared.connectedScenes
             .compactMap({ $0 as? UIWindowScene })
             .first(where: { $0.activationState == .foregroundActive || $0.activationState == .foregroundInactive }),

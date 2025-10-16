@@ -29,9 +29,22 @@
 		32AC16382E9EB13D006AB9F2 /* SafepocketUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = SafepocketUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
+/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		32921B282EA1227B0063B3FC /* Exceptions for "Safepocket" folder in "Safepocket" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				"Support/Safepocket-Info.plist",
+			);
+			target = 32AC161D2E9EB13B006AB9F2 /* Safepocket */;
+		};
+/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
+
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		32AC16202E9EB13B006AB9F2 /* Safepocket */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				32921B282EA1227B0063B3FC /* Exceptions for "Safepocket" folder in "Safepocket" target */,
+			);
 			path = Safepocket;
 			sourceTree = "<group>";
 		};

@@ -22,9 +22,6 @@ struct Account: Identifiable, Codable, Hashable {
         case lastTransactionAt
         case linkedAt
     }
-    
-    // 後方互換性のための computed property
-    var bankName: String { institution }
 }
 
 extension Account {
