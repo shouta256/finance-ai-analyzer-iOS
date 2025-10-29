@@ -1,18 +1,18 @@
-# バックエンド環境変数設定が必要
+# Backend Environment Variables Required
 
-## 現状
+## Current status
 
-iOS側の実装は完了し、以下が正常に動作しています：
+The iOS implementation is complete and the following flows work as expected:
 
-- ✅ Cognito Hosted UIでの認証
-- ✅ Authorization codeの取得
-- ✅ 正しいJSON形式でのAPI呼び出し
-- ✅ Keychain統合
-- ✅ 自動トークンリフレッシュ機能
+- ✅ Cognito Hosted UI authentication
+- ✅ Authorization code retrieval
+- ✅ API calls with the expected JSON payloads
+- ✅ Keychain integration
+- ✅ Automatic token refresh
 
-## 問題
+## Issue
 
-バックエンド（`https://api.shota256.me`）で以下のエラーが発生：
+The backend (`https://api.shota256.me`) currently returns:
 
 ```json
 {
@@ -24,9 +24,9 @@ iOS側の実装は完了し、以下が正常に動作しています：
 }
 ```
 
-## 必要な対応
+## Required action
 
-バックエンドアプリケーションに以下の環境変数を設定してください：
+Configure the following environment variables in the backend application:
 
 ```bash
 COGNITO_DOMAIN=https://us-east-1mfd4o5tgy.auth.us-east-1.amazoncognito.com
@@ -34,7 +34,7 @@ COGNITO_CLIENT_ID=p4tu620p2eriv24tb1897d49s
 COGNITO_REDIRECT_URI=safepocket://auth/callback
 ```
 
-### デプロイ環境別の設定方法
+### Deployment-specific examples
 
 #### AWS Elastic Beanstalk
 ```bash
@@ -65,16 +65,16 @@ env:
     value: "safepocket://auth/callback"
 ```
 
-#### ローカル開発（.env ファイル）
+#### Local development (.env file)
 ```bash
 COGNITO_DOMAIN=https://us-east-1mfd4o5tgy.auth.us-east-1.amazoncognito.com
 COGNITO_CLIENT_ID=p4tu620p2eriv24tb1897d49s
 COGNITO_REDIRECT_URI=safepocket://auth/callback
 ```
 
-## 検証方法
+## Validation steps
 
-環境変数設定後、以下のcURLコマンドで動作確認できます：
+After configuring the environment variables, verify the setup with:
 
 ```bash
 curl -X POST https://api.shota256.me/api/auth/token \
@@ -88,11 +88,11 @@ curl -X POST https://api.shota256.me/api/auth/token \
   }'
 ```
 
-期待される結果：
-- ❌ `"reason": "Cognito domain not configured"` → 環境変数未設定
-- ✅ `"code": "INVALID_ARGUMENT"` または Cognito関連のエラー → 環境変数設定済み（正しい動作）
+Expected result:
+- ❌ `"reason": "Cognito domain not configured"` → environment variables missing
+- ✅ `"code": "INVALID_ARGUMENT"` or a Cognito-specific error → environment variables are set correctly
 
-## iOS側から送信されるリクエスト例
+## Example request from iOS
 
 ```json
 POST /api/auth/token
@@ -106,14 +106,14 @@ Content-Type: application/json
 }
 ```
 
-## 次のステップ
+## Next steps
 
-環境変数設定後：
-1. バックエンドを再起動
-2. iOS アプリでログインを再試行
-3. 認証が成功すれば、口座一覧画面に遷移
-4. トークンリフレッシュ機能を検証
+After updating the environment variables:
+1. Restart the backend service.
+2. Retry the login flow in the iOS app.
+3. Confirm the account list appears once authentication succeeds.
+4. Verify that token refresh works end-to-end.
 
-## 連絡先
+## Contact
 
-バックエンド設定完了後、iOS側でエンドツーエンドテストを実施します。
+Once the backend configuration is complete, the iOS team can run end-to-end tests.
