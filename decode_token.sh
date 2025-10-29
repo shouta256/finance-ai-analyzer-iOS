@@ -1,11 +1,11 @@
 #!/bin/bash
 
-# このスクリプトは、アプリのログから取得したアクセストークンをデコードして
-# ユーザー情報（sub, email等）を表示します
+# This script decodes an access token captured from the app logs
+# and prints the user claims (sub, email, etc.).
 
-# 使い方:
-# 1. iOSアプリのログからアクセストークンをコピー
-# 2. このスクリプトを実行: ./decode_token.sh <access_token>
+# Usage:
+# 1. Copy the access token from the iOS app logs.
+# 2. Run this script: ./decode_token.sh <access_token>
 
 if [ -z "$1" ]; then
   echo "Usage: $0 <jwt_token>"
@@ -17,14 +17,14 @@ fi
 
 TOKEN="$1"
 
-# JWTは3つのパートに分かれています: header.payload.signature
-# payloadをデコードします
+# A JWT has three parts: header.payload.signature.
+# Decode the payload portion.
 PAYLOAD=$(echo "$TOKEN" | cut -d'.' -f2)
 
-# Base64デコード（URLセーフ版）
-# macOSのbase64コマンドはパディングを自動調整します
+# Base64 decode (URL-safe variant).
+# The macOS base64 command automatically handles missing padding.
 echo "$PAYLOAD" | base64 -d 2>/dev/null | jq '.' || {
-  # パディング調整が必要な場合
+  # Adjust padding manually if necessary.
   PADDED="$PAYLOAD"
   case $((${#PAYLOAD} % 4)) in
     2) PADDED="${PAYLOAD}==" ;;

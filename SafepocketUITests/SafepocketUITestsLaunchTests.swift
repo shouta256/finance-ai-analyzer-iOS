@@ -2,7 +2,7 @@
 //  SafepocketUITestsLaunchTests.swift
 //  SafepocketUITests
 //
-//  Created by 鈴木翔太 on 2025/10/14.
+//  Created by Shota Suzuki on 2025/10/14.
 //
 
 import XCTest
