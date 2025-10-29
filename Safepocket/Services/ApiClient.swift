@@ -3,6 +3,9 @@ import Foundation
 enum ApiError: Error, LocalizedError {
     case invalidCredentials
     case unauthorized
+    case forbidden
+    case notFound
+    case rateLimited
     case decodingFailed
     case unreachable
     case unknown
@@ -13,6 +16,12 @@ enum ApiError: Error, LocalizedError {
             return "The credentials provided were rejected."
         case .unauthorized:
             return "Your session has expired. Please sign in again."
+        case .forbidden:
+            return "You do not have permission to perform that action."
+        case .notFound:
+            return "The requested resource could not be found."
+        case .rateLimited:
+            return "You’re sending requests too quickly. Please retry in a moment."
         case .decodingFailed:
             return "The response from the server was not understood."
         case .unreachable:

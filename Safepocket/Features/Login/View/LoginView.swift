@@ -14,10 +14,10 @@ struct LoginView: View {
                     .font(.system(size: 48))
                     .foregroundStyle(.tint)
 
-                Text("Safepocket にサインイン")
+                Text("Sign in to Safepocket")
                     .font(.title2.bold())
 
-                Text("口座情報を閲覧するには Safepocket アカウントでの認証が必要です。")
+                Text("Authenticate with your Safepocket account to view your linked accounts.")
                     .font(.body)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
@@ -37,7 +37,7 @@ struct LoginView: View {
                         .progressViewStyle(.circular)
                         .frame(maxWidth: .infinity)
                 } else {
-                    Text("Safepocketでログイン")
+                    Text("Continue with Safepocket")
                         .frame(maxWidth: .infinity)
                 }
             }

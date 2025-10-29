@@ -2,7 +2,7 @@
 import Foundation
 
 struct MockApiClient: ApiClient {
-    private let latency: UInt64 = 300_000_000 // 0.3s
+    private let latency: UInt64 = 300_000_000 // 0.3 seconds
 
     func exchangeAuthCode(_ code: String, codeVerifier: String, redirectUri: String) async throws -> AuthSession {
         try await Task.sleep(nanoseconds: latency)
@@ -13,7 +13,7 @@ struct MockApiClient: ApiClient {
             accessToken: "mock-access-token-\(UUID().uuidString)",
             refreshToken: "mock-refresh-token-\(UUID().uuidString)",
             idToken: nil,
-            expiresAt: Date().addingTimeInterval(60 * 60), // 1時間
+            expiresAt: Date().addingTimeInterval(60 * 60), // 1 hour
             userId: "mock-user-\(UUID().uuidString)",
             tokenType: "Bearer"
         )
@@ -26,7 +26,7 @@ struct MockApiClient: ApiClient {
         }
         return AuthSession(
             accessToken: "mock-access-token-refreshed-\(UUID().uuidString)",
-            refreshToken: refreshToken, // 同じリフレッシュトークンを返す
+            refreshToken: refreshToken, // Return the same refresh token
             idToken: nil,
             expiresAt: Date().addingTimeInterval(60 * 60),
             userId: "mock-user-\(UUID().uuidString)",

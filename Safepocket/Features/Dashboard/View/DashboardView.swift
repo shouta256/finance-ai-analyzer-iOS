@@ -7,6 +7,7 @@ struct DashboardView: View {
     @StateObject private var viewModel: DashboardViewModel
     @StateObject private var summaryViewModel: AISummaryViewModel
     @State private var pendingAction: DashboardAction?
+    @State private var isShowingSettings: Bool = false
 
     init(
         viewModel: DashboardViewModel,
@@ -17,20 +18,14 @@ struct DashboardView: View {
     }
 
     var body: some View {
-        ScrollView {
-            LazyVStack(alignment: .leading, spacing: 20) {
-                header
-
-                actionButtons
+        ScrollView(.vertical, showsIndicators: false) {
+            VStack(spacing: 24) {
+                heroSection
 
                 if let snapshot = viewModel.snapshot {
-                    summarySection(from: snapshot.summary)
+                    insightsSection(snapshot: snapshot)
 
-                    overviewSection(snapshot: snapshot)
-
-                    if let highlight = snapshot.monthlyHighlight {
-                        highlightSection(highlight)
-                    }
+                    aiSummarySection
 
                     if !snapshot.anomalyAlerts.isEmpty {
                         anomalySection(alerts: snapshot.anomalyAlerts)
@@ -40,42 +35,21 @@ struct DashboardView: View {
                         transactionsSection(transactions: snapshot.recentTransactions)
                     }
                 } else if let errorMessage = viewModel.errorMessage {
-                    DashboardCard {
-                        VStack(alignment: .leading, spacing: 12) {
-                            Label("We couldn’t load the dashboard.", systemImage: "exclamationmark.triangle.fill")
-                                .font(.headline)
-                                .tint(.orange)
-                            Text(errorMessage)
-                                .font(.subheadline)
-                                .foregroundStyle(.secondary)
-                            Button("Retry") {
-                                Task { await viewModel.loadDashboard() }
-                            }
-                            .buttonStyle(.borderedProminent)
-                            .controlSize(.small)
-                        }
-                    }
+                    errorState(message: errorMessage)
                 } else if !viewModel.isLoading {
-                    DashboardCard {
-                        VStack(alignment: .leading, spacing: 8) {
-                            Text("No dashboard data yet")
-                                .font(.headline)
-                            Text("Link your accounts to start seeing spending insights, anomalies, and your latest transactions.")
-                                .font(.subheadline)
-                                .foregroundStyle(.secondary)
-                        }
-                    }
+                    emptyState
                 }
             }
             .padding(.horizontal, 20)
-            .padding(.vertical, 24)
+            .padding(.top, 24)
+            .padding(.bottom, 36)
         }
-        .background(Color(.systemGroupedBackground).ignoresSafeArea())
+        .background(backgroundGradient.ignoresSafeArea())
         .overlay(alignment: .center) {
             if viewModel.isLoading {
                 ProgressView("Loading dashboard…")
                     .padding()
-                    .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12))
+                    .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
             }
         }
         .navigationTitle("Dashboard")
@@ -88,20 +62,24 @@ struct DashboardView: View {
                 }
             }
             ToolbarItem(placement: .topBarTrailing) {
-                Button("Sign Out") {
-                    viewModel.signOut()
+                Button {
+                    isShowingSettings = true
+                } label: {
+                    Label("Settings", systemImage: "gearshape")
+                        .labelStyle(.iconOnly)
+                        .imageScale(.medium)
+                        .accessibilityLabel("Dashboard settings")
                 }
             }
         }
         .task {
+            summaryViewModel.selectedMonth = viewModel.selectedMonth
             async let dashboard: Void = viewModel.loadDashboard()
             async let summary: Void = summaryViewModel.loadSummary()
-            await dashboard
-            await summary
+            _ = await (dashboard, summary)
         }
         .refreshable {
-            await viewModel.loadDashboard()
-            await summaryViewModel.loadSummary(force: true)
+            await performFullRefresh(force: true)
         }
         .alert(item: $pendingAction) { action in
             Alert(
@@ -110,188 +88,338 @@ struct DashboardView: View {
                 dismissButton: .default(Text("OK"))
             )
         }
-    }
-
-    private var header: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("Safepocket Dashboard")
-                .font(.largeTitle.bold())
-            Text("Secure financial intelligence with Plaid sandbox connectivity.")
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
+        .sheet(isPresented: $isShowingSettings) {
+            NavigationStack {
+                DashboardSettingsView(
+                    onAction: { pendingAction = $0 },
+                    onRefresh: { refreshDashboardData() },
+                    onSignOut: {
+                        viewModel.signOut()
+                        isShowingSettings = false
+                    }
+                )
+            }
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    private var actionButtons: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 12) {
-                DashboardActionButton(title: "Link Accounts with Plaid", style: .primary) {
-                    pendingAction = .linkAccounts
+    private var backgroundGradient: LinearGradient {
+        LinearGradient(
+            colors: [
+                Color(.systemGroupedBackground),
+                Color(.systemBackground)
+            ],
+            startPoint: .top,
+            endPoint: .bottom
+        )
+    }
+
+    private var heroSection: some View {
+        ZStack(alignment: .topLeading) {
+            RoundedRectangle(cornerRadius: 28, style: .continuous)
+                .fill(
+                    LinearGradient(
+                        colors: [
+                            Color.indigo.opacity(0.9),
+                            Color.blue.opacity(0.85)
+                        ],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                )
+
+            VStack(alignment: .leading, spacing: 20) {
+                monthSelector
+
+                VStack(alignment: .leading, spacing: 12) {
+                    Text("Net position")
+                        .font(.caption2.weight(.semibold))
+                        .textCase(.uppercase)
+                        .foregroundStyle(Color.white.opacity(0.7))
+
+                    Text(currentNetValue)
+                        .font(.system(size: 38, weight: .heavy, design: .rounded))
+                        .monospacedDigit()
+                        .foregroundStyle(Color.white)
+
+                    if let summary = viewModel.snapshot?.summary {
+                        HStack(spacing: 16) {
+                            HeroMetricPill(
+                                title: "Income",
+                                value: CurrencyFormatter.string(from: summary.income, currencyCode: summary.currencyCode),
+                                icon: "arrow.down.circle.fill",
+                                tint: Color.white.opacity(0.18)
+                            )
+                            HeroMetricPill(
+                                title: "Expenses",
+                                value: CurrencyFormatter.string(from: summary.expenses, currencyCode: summary.currencyCode),
+                                icon: "arrow.up.circle.fill",
+                                tint: Color.white.opacity(0.12)
+                            )
+                        }
+                    } else {
+                        Text("Link an account to unlock your month-by-month insights.")
+                            .font(.footnote)
+                            .foregroundStyle(Color.white.opacity(0.7))
+                    }
                 }
-                DashboardActionButton(title: "Try Demo Data", style: .tinted(.green)) {
-                    pendingAction = .demoData
+            }
+            .padding(24)
+        }
+        .frame(maxWidth: .infinity)
+    }
+
+    private var monthSelector: some View {
+        HStack(spacing: 12) {
+            Button {
+                shiftMonth(by: -1)
+            } label: {
+                Image(systemName: "chevron.left")
+                    .font(.headline.weight(.semibold))
+                    .frame(width: 32, height: 32)
+                    .foregroundStyle(Color.white)
+                    .background(Color.white.opacity(0.16), in: Circle())
+            }
+            .accessibilityLabel("Previous month")
+
+            Menu {
+                ForEach(viewModel.availableMonths, id: \.self) { month in
+                    Button {
+                        selectMonth(month)
+                    } label: {
+                        let isSelected = DashboardViewModel.monthStart(from: month) == viewModel.selectedMonth
+                        Label(
+                            Self.menuFormatter.string(from: month),
+                            systemImage: isSelected ? "checkmark.circle.fill" : "circle"
+                        )
+                    }
                 }
-                DashboardActionButton(title: "Sync Transactions", style: .plain) {
-                    pendingAction = .syncTransactions
+            } label: {
+                HStack(spacing: 6) {
+                    Text(viewModel.monthTitle)
+                        .font(.headline.weight(.semibold))
+                        .foregroundStyle(Color.white)
+                    Image(systemName: "chevron.down")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(Color.white.opacity(0.7))
                 }
-                DashboardActionButton(title: "Generate AI Summary", style: .plain) {
+                .padding(.horizontal, 14)
+                .padding(.vertical, 10)
+                .background(Color.white.opacity(0.18), in: Capsule(style: .continuous))
+            }
+            .menuOrder(.fixed)
+
+            Button {
+                shiftMonth(by: 1)
+            } label: {
+                Image(systemName: "chevron.right")
+                    .font(.headline.weight(.semibold))
+                    .frame(width: 32, height: 32)
+                    .foregroundStyle(viewModel.canMoveForward ? Color.white : Color.white.opacity(0.3))
+                    .background(Color.white.opacity(viewModel.canMoveForward ? 0.16 : 0.08), in: Circle())
+            }
+            .accessibilityLabel("Next month")
+            .disabled(!viewModel.canMoveForward)
+        }
+    }
+
+    private var currentNetValue: String {
+        guard let summary = viewModel.snapshot?.summary else {
+            return "—"
+        }
+        return CurrencyFormatter.string(from: summary.net, currencyCode: summary.currencyCode)
+    }
+
+    private func shiftMonth(by offset: Int) {
+        guard offset != 0 else { return }
+        Task {
+            await viewModel.moveMonth(offset: offset)
+            let updated = viewModel.selectedMonth
+            await MainActor.run {
+                summaryViewModel.selectedMonth = updated
+            }
+            await summaryViewModel.loadSummary(force: true)
+        }
+    }
+
+    private func selectMonth(_ month: Date) {
+        Task {
+            await viewModel.loadDashboard(month: month, force: true)
+            let normalized = DashboardViewModel.monthStart(from: month)
+            await MainActor.run {
+                summaryViewModel.selectedMonth = normalized
+            }
+            await summaryViewModel.loadSummary(force: true)
+        }
+    }
+
+    private func refreshDashboardData() {
+        Task {
+            await performFullRefresh(force: true)
+        }
+    }
+
+    private func performFullRefresh(force: Bool) async {
+        await viewModel.loadDashboard(force: force)
+        summaryViewModel.selectedMonth = viewModel.selectedMonth
+        await summaryViewModel.loadSummary(force: force)
+    }
+
+    private func errorState(message: String) -> some View {
+        DashboardCard {
+            VStack(alignment: .leading, spacing: 12) {
+                Label("We couldn’t load the dashboard.", systemImage: "exclamationmark.triangle.fill")
+                    .font(.headline)
+                    .tint(.orange)
+                Text(message)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                Button("Retry") {
                     Task {
+                        await viewModel.loadDashboard(force: true)
+                        summaryViewModel.selectedMonth = viewModel.selectedMonth
                         await summaryViewModel.loadSummary(force: true)
                     }
                 }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.small)
             }
-            .padding(.vertical, 2)
         }
     }
 
-    private func summarySection(from summary: DashboardSnapshot.Summary) -> some View {
-        AdaptiveGrid(minimumWidth: 180) {
-            SummaryCard(
-                title: "Income",
-                value: CurrencyFormatter.string(from: summary.income, currencyCode: summary.currencyCode),
-                caption: "Current month",
-                color: Color.green.opacity(0.12),
-                valueColor: .green
-            )
-
-            SummaryCard(
-                title: "Expenses",
-                value: CurrencyFormatter.string(from: summary.expenses, currencyCode: summary.currencyCode),
-                caption: "Current month",
-                color: Color.red.opacity(0.12),
-                valueColor: .red
-            )
-
-            SummaryCard(
-                title: "Net",
-                value: CurrencyFormatter.string(from: summary.net, currencyCode: summary.currencyCode),
-                caption: "Income - Expenses",
-                color: Color.blue.opacity(0.12),
-                valueColor: summary.net >= 0 ? .green : .red
-            )
-        }
-    }
-
-    private func overviewSection(snapshot: DashboardSnapshot) -> some View {
-        VStack(alignment: .leading, spacing: 20) {
-            AdaptiveGrid(minimumWidth: 260) {
-                DashboardCard {
-                    VStack(alignment: .leading, spacing: 12) {
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text("Spend by Category")
-                                .font(.headline)
-                            Text("Top categories for the month.")
-                                .font(.footnote)
-                                .foregroundStyle(.secondary)
-                        }
-
-                        if snapshot.categories.isEmpty {
-                            Text("No spending yet.")
-                                .font(.subheadline)
-                                .foregroundStyle(.secondary)
-                        } else {
-                            VStack(alignment: .leading, spacing: 12) {
-                                ForEach(snapshot.categories) { category in
-                                    CategorySpendRow(category: category, currencyCode: snapshot.summary.currencyCode)
-                                }
-                            }
-                        }
-                    }
-                }
-
-                DashboardCard {
-                    VStack(alignment: .leading, spacing: 12) {
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text("Top Merchants")
-                                .font(.headline)
-                            Text("Highest activity merchants.")
-                                .font(.footnote)
-                                .foregroundStyle(.secondary)
-                        }
-
-                        if snapshot.merchants.isEmpty {
-                            Text("No merchant activity yet.")
-                                .font(.subheadline)
-                                .foregroundStyle(.secondary)
-                        } else {
-                            VStack(alignment: .leading, spacing: 12) {
-                                ForEach(snapshot.merchants) { merchant in
-                                    MerchantRow(merchant: merchant, currencyCode: snapshot.summary.currencyCode)
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-
-            aiSummarySection
-        }
-    }
-
-    private func highlightSection(_ highlight: DashboardSnapshot.MonthlyHighlight) -> some View {
+    private var emptyState: some View {
         DashboardCard {
-            VStack(alignment: .leading, spacing: 12) {
-                Text(highlight.title)
+            VStack(alignment: .leading, spacing: 10) {
+                Text("No dashboard data yet")
                     .font(.headline)
-                Text(highlight.message)
+                Text("Link your accounts to start seeing spending insights, anomalies, and your latest transactions.")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
-                Text("Reporting period \(highlight.generatedForPeriod)")
-                    .font(.caption)
-                    .foregroundStyle(.tertiary)
+            }
+        }
+    }
+
+    private static let menuFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "LLLL yyyy"
+        formatter.locale = Locale.autoupdatingCurrent
+        return formatter
+    }()
+
+    private func insightsSection(snapshot: DashboardSnapshot) -> some View {
+        AdaptiveGrid(minimumWidth: 280) {
+            DashboardCard {
+                VStack(alignment: .leading, spacing: 16) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Spending by Category")
+                            .font(.headline)
+                        Text("Where your money went this month.")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
+
+                    if snapshot.categories.isEmpty {
+                        Text("No category insights yet.")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                    } else {
+                        VStack(alignment: .leading, spacing: 12) {
+                            ForEach(snapshot.categories) { category in
+                                CategorySpendRow(category: category, currencyCode: snapshot.summary.currencyCode)
+                            }
+                        }
+                    }
+                }
+            }
+
+            DashboardCard {
+                VStack(alignment: .leading, spacing: 16) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Top Merchants")
+                            .font(.headline)
+                        Text("Highest activity merchants this month.")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
+
+                    if snapshot.merchants.isEmpty {
+                        Text("No merchant activity yet.")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                    } else {
+                        VStack(alignment: .leading, spacing: 12) {
+                            ForEach(snapshot.merchants) { merchant in
+                                MerchantRow(merchant: merchant, currencyCode: snapshot.summary.currencyCode)
+                            }
+                        }
+                    }
+                }
             }
         }
     }
 
     private var aiSummarySection: some View {
         DashboardCard {
-            VStack(alignment: .leading, spacing: 16) {
-                HStack(alignment: .top, spacing: 12) {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("AI Summary")
-                            .font(.headline)
-                        Text("SafepocketのAIが支出データから要約を生成します。")
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
-                    }
+            VStack(alignment: .leading, spacing: 20) {
+                HStack(spacing: 12) {
+                    Label("AI Highlights", systemImage: "sparkles")
+                        .font(.headline)
                     Spacer()
-                    Button(summaryViewModel.prompt) {
+                    Button {
                         Task {
+                            summaryViewModel.selectedMonth = viewModel.selectedMonth
                             await summaryViewModel.loadSummary(force: true)
                         }
+                    } label: {
+                        Label("Generate", systemImage: "arrow.triangle.2.circlepath")
                     }
                     .buttonStyle(.borderedProminent)
                     .tint(.indigo)
                     .controlSize(.small)
+                    .disabled(summaryViewModel.isLoading)
                 }
+
+                if let summary = summaryViewModel.summary {
+                    Text("Updated \(Self.detectedFormatter.string(from: summary.generatedAt))")
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
+                }
+
+                Text("Question: \(summaryViewModel.prompt)")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
 
                 Group {
                     if summaryViewModel.isLoading {
                         ProgressView("Generating summary…")
                     } else if let summary = summaryViewModel.summary {
-                        VStack(alignment: .leading, spacing: 12) {
+                        VStack(alignment: .leading, spacing: 14) {
                             summaryText(from: summary.response)
+                                .font(.body)
 
-                            HStack(spacing: 12) {
-                                Button("Copy") {
-                                    copyToPasteboard(summary.response)
-                                }
-                                .buttonStyle(.bordered)
-                                .controlSize(.small)
-
-                                Text("Updated \(Self.detectedFormatter.string(from: summary.generatedAt))")
-                                    .font(.caption)
-                                    .foregroundStyle(.tertiary)
+                            Button {
+                                copyToPasteboard(summary.response)
+                            } label: {
+                                Label("Copy", systemImage: "doc.on.doc")
                             }
+                            .buttonStyle(.bordered)
+                            .controlSize(.small)
                         }
+                        .padding(16)
+                        .background(
+                            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                                .fill(Color(.systemBackground))
+                        )
                     } else if let errorMessage = summaryViewModel.errorMessage {
                         VStack(alignment: .leading, spacing: 8) {
                             Text(errorMessage)
                                 .font(.subheadline)
                                 .foregroundStyle(.red)
-                            Button("Retry") {
-                                Task { await summaryViewModel.loadSummary(force: true) }
+                            Button {
+                                Task {
+                                    await summaryViewModel.loadSummary(force: true)
+                                }
+                            } label: {
+                                Label("Retry", systemImage: "arrow.clockwise")
                             }
                             .buttonStyle(.borderedProminent)
                             .controlSize(.small)
@@ -413,83 +541,6 @@ private extension DashboardView {
 
 // MARK: - Components
 
-private struct DashboardActionButton: View {
-    enum Style {
-        case primary
-        case plain
-        case tinted(Color)
-    }
-
-    let title: String
-    let style: Style
-    let action: () -> Void
-
-    var body: some View {
-        switch style {
-        case .primary:
-            Button(action: action) {
-                label.foregroundStyle(Color.white)
-            }
-            .buttonStyle(DashboardPrimaryButtonStyle())
-        case .plain:
-            Button(action: action) {
-                label.foregroundStyle(Color.accentColor)
-            }
-            .buttonStyle(DashboardOutlineButtonStyle())
-        case .tinted(let color):
-            Button(action: action) {
-                label.foregroundStyle(color)
-            }
-            .buttonStyle(DashboardTintedButtonStyle(color: color))
-        }
-    }
-
-    private var label: some View {
-        Text(title)
-            .font(.subheadline.bold())
-            .padding(.horizontal, 16)
-            .padding(.vertical, 10)
-            .frame(minWidth: 140)
-    }
-}
-
-private struct DashboardPrimaryButtonStyle: ButtonStyle {
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .background(
-                Capsule()
-                    .fill(configuration.isPressed ? Color.indigo.opacity(0.8) : Color.indigo)
-            )
-            .scaleEffect(configuration.isPressed ? 0.97 : 1.0)
-            .animation(.easeOut(duration: 0.15), value: configuration.isPressed)
-    }
-}
-
-private struct DashboardOutlineButtonStyle: ButtonStyle {
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .background(
-                Capsule()
-                    .stroke(Color.accentColor.opacity(configuration.isPressed ? 0.6 : 1.0), lineWidth: 1.5)
-            )
-            .scaleEffect(configuration.isPressed ? 0.97 : 1.0)
-            .animation(.easeOut(duration: 0.15), value: configuration.isPressed)
-    }
-}
-
-private struct DashboardTintedButtonStyle: ButtonStyle {
-    let color: Color
-
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .background(
-                Capsule()
-                    .fill(color.opacity(configuration.isPressed ? 0.18 : 0.12))
-            )
-            .scaleEffect(configuration.isPressed ? 0.97 : 1.0)
-            .animation(.easeOut(duration: 0.15), value: configuration.isPressed)
-    }
-}
 
 private struct AdaptiveGrid<Content: View>: View {
     let minimumWidth: CGFloat
@@ -507,29 +558,33 @@ private struct AdaptiveGrid<Content: View>: View {
     }
 }
 
-private struct SummaryCard: View {
+private struct HeroMetricPill: View {
     let title: String
     let value: String
-    let caption: String
-    let color: Color
-    let valueColor: Color
+    let icon: String
+    let tint: Color
 
     var body: some View {
-        DashboardCard(background: color) {
-            VStack(alignment: .leading, spacing: 6) {
-                Text(title.uppercased())
-                    .font(.caption.bold())
-                    .foregroundStyle(.secondary)
+        HStack(spacing: 10) {
+            Image(systemName: icon)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.white)
+                .padding(8)
+                .background(Color.white.opacity(0.14), in: Circle())
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(Color.white.opacity(0.7))
                 Text(value)
-                    .font(.title2.bold())
-                    .foregroundStyle(valueColor)
+                    .font(.footnote.weight(.semibold))
+                    .foregroundStyle(.white)
                     .monospacedDigit()
-                Text(caption)
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-                    .padding(.top, 8)
             }
         }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+        .background(tint, in: Capsule(style: .continuous))
     }
 }
 
@@ -537,17 +592,83 @@ private struct DashboardCard<Content: View>: View {
     let background: Color
     @ViewBuilder let content: Content
 
-    init(background: Color = Color(.systemBackground), @ViewBuilder content: () -> Content) {
+    init(background: Color = Color(.secondarySystemGroupedBackground), @ViewBuilder content: () -> Content) {
         self.background = background
         self.content = content()
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12, content: { content })
-            .padding(16)
+        VStack(alignment: .leading, spacing: 16, content: { content })
+            .padding(20)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(background, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-            .shadow(color: Color.black.opacity(0.04), radius: 8, x: 0, y: 4)
+            .background(
+                RoundedRectangle(cornerRadius: 22, style: .continuous)
+                    .fill(background)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 22, style: .continuous)
+                    .stroke(Color.primary.opacity(0.04))
+            )
+    }
+}
+
+private struct DashboardSettingsView: View {
+    @Environment(\.dismiss) private var dismiss
+    let onAction: (DashboardView.DashboardAction) -> Void
+    let onRefresh: () -> Void
+    let onSignOut: () -> Void
+
+    var body: some View {
+        List {
+            Section("Accounts & Sync") {
+                Button {
+                    onAction(.linkAccounts)
+                    dismiss()
+                } label: {
+                    Label("Link Accounts", systemImage: "link.badge.plus")
+                }
+
+                Button {
+                    onAction(.syncTransactions)
+                    dismiss()
+                } label: {
+                    Label("Sync Transactions", systemImage: "arrow.triangle.2.circlepath")
+                }
+
+                Button {
+                    onAction(.demoData)
+                    dismiss()
+                } label: {
+                    Label("Load Demo Data", systemImage: "sparkles")
+                }
+
+                Button {
+                    onRefresh()
+                    dismiss()
+                } label: {
+                    Label("Refresh Dashboard Data", systemImage: "arrow.clockwise")
+                }
+            }
+
+            Section {
+                Button(role: .destructive) {
+                    onSignOut()
+                    dismiss()
+                } label: {
+                    Label("Sign Out", systemImage: "arrow.right.square")
+                }
+            }
+        }
+        .listStyle(.insetGrouped)
+        .scrollContentBackground(.hidden)
+        .navigationTitle("Dashboard Settings")
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button("Done") {
+                    dismiss()
+                }
+            }
+        }
     }
 }
 
@@ -778,7 +899,7 @@ private struct DashboardViewPreview: View {
                     sessionController: sessionController
                 ),
                 summaryViewModel: AISummaryViewModel(
-                    prompt: "何に一番お金使ってる？",
+                    prompt: "Where am I spending the most?",
                     aiService: DemoAIService(),
                     sessionController: sessionController
                 )

@@ -14,7 +14,7 @@ struct AppConfiguration {
     #if DEBUG
     let defaultBase = "http://localhost:8081"
     #else
-    let defaultBase = "https://api.shota256.me"
+    let defaultBase = "https://pj7degbcig.execute-api.us-east-1.amazonaws.com/prod"
     #endif
     let baseURLString = (info["ApiBaseURL"] as? String) ?? defaultBase
 
@@ -35,7 +35,7 @@ struct AppConfiguration {
         }
 
         let clientId = (info["CognitoClientId"] as? String) ?? "5ge4c1b382ft2v71rvip0rrhqv"
-        let scopeString = (info["CognitoScopes"] as? String) ?? "openid email phone"
+        let scopeString = (info["CognitoScopes"] as? String) ?? "openid email profile"
         let scopes = scopeString.split(separator: " ").map { String($0) }.filter { !$0.isEmpty }
 
         return AppConfiguration(

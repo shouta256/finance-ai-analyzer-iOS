@@ -1,6 +1,7 @@
 import AuthenticationServices
 import CryptoKit
 import Foundation
+import os
 import UIKit
 
 @MainActor
@@ -16,10 +17,10 @@ enum AuthServiceError: Error, LocalizedError {
 
     var errorDescription: String? {
         switch self {
-        case .unableToConstructAuthorizeURL: return "ログイン用URLの生成に失敗しました。"
-        case .missingAuthorizationCode: return "認証コードの取得に失敗しました。もう一度お試しください。"
-        case .cancelled: return "ログインがキャンセルされました。"
-        case .stateMismatch: return "セキュリティ検証に失敗しました。もう一度お試しください。"
+        case .unableToConstructAuthorizeURL: return "Unable to construct the sign-in URL."
+        case .missingAuthorizationCode: return "We could not retrieve the authorization code. Please try again."
+        case .cancelled: return "Sign-in was cancelled."
+        case .stateMismatch: return "State verification failed. Please try again."
         }
     }
 }
@@ -29,6 +30,7 @@ final class CognitoAuthService: NSObject, AuthService {
     private let configuration: AppConfiguration
     private let apiClient: ApiClient
     private var webAuthSession: ASWebAuthenticationSession?
+    private let logger = Logger(subsystem: Bundle.main.bundleIdentifier ?? "Safepocket", category: "Auth")
 
     init(configuration: AppConfiguration, apiClient: ApiClient) {
         self.configuration = configuration
@@ -41,22 +43,15 @@ final class CognitoAuthService: NSObject, AuthService {
         let codeChallenge = makeCodeChallenge(from: codeVerifier)
         let state = makeState()
         let authorizeURL = try makeAuthorizeURL(codeChallenge: codeChallenge, state: state)
-        #if DEBUG
-        print("[Auth] Starting Cognito sign-in with URL: \(authorizeURL.absoluteString)")
-        #endif
+        logger.debug("Starting Cognito sign-in flow.")
         let callbackURL = try await startSession(authorizeURL: authorizeURL)
-        #if DEBUG
-        print("[Auth] Received callback URL: \(callbackURL.absoluteString)")
-        #endif
+        logger.debug("Received callback URL from Cognito.")
         let (authorizationCode, returnedState) = try extractAuthorizationCodeAndState(from: callbackURL)
         guard returnedState == state else { throw AuthServiceError.stateMismatch }
-        #if DEBUG
-        print("[Auth] State verified. Exchanging code with backend at: \(configuration.baseURL.absoluteString)")
-        #endif
+        logger.debug("State verified. Exchanging authorization code with backend.")
         let session = try await apiClient.exchangeAuthCode(authorizationCode, codeVerifier: codeVerifier, redirectUri: configuration.cognitoRedirectURI.absoluteString)
-        #if DEBUG
-        print("[Auth] Login successful. User ID: \(session.userId ?? "unknown"), Display Name: \(session.userDisplayName)")
-        #endif
+        let userId = session.userId ?? "unknown"
+        logger.notice("Login succeeded. userId: \(userId, privacy: .private(mask: .hash)), displayName: \(session.userDisplayName, privacy: .public)")
         return session
     }
 
@@ -93,9 +88,7 @@ final class CognitoAuthService: NSObject, AuthService {
                     continuation.resume(throwing: AuthServiceError.missingAuthorizationCode)
                     return
                 }
-                #if DEBUG
-                print("[Auth] ASWebAuthenticationSession finished with callback URL: \(callbackURL.absoluteString)")
-                #endif
+                self.logger.debug("ASWebAuthenticationSession finished.")
                 continuation.resume(returning: callbackURL)
             }
             session.presentationContextProvider = self

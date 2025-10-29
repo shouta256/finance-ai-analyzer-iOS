@@ -12,7 +12,7 @@ struct SafepocketApp: App {
         let configuration = AppConfiguration.shared
         let apiClient = RemoteApiClient(configuration: configuration)
         let authService = CognitoAuthService(configuration: configuration, apiClient: apiClient)
-        let dashboardService: any DashboardService = DemoDashboardService()
+        let dashboardService: any DashboardService = RemoteDashboardService(configuration: configuration)
         let aiService: any AIService = RemoteAIService(configuration: configuration)
         let sessionStore: SessionStore = KeychainSessionStore()
 

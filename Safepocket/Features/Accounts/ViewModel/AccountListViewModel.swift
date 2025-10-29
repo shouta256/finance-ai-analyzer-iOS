@@ -28,7 +28,7 @@ final class AccountListViewModel: ObservableObject {
         guard !isLoading else { return }
 
         if let session = sessionController.session, session.isExpired {
-            // トークンが期限切れの場合、リフレッシュを試みる
+            // Attempt to refresh credentials if the access token has expired
             if let refreshToken = session.refreshToken {
                 do {
                     let newSession = try await apiClient.refreshAccessToken(refreshToken)
@@ -60,12 +60,12 @@ final class AccountListViewModel: ObservableObject {
         do {
             accounts = try await apiClient.fetchAccounts(accessToken: accessToken)
         } catch ApiError.unauthorized {
-            // 401の場合、リフレッシュトークンで再試行
+            // Retry with the refresh token when we receive a 401
             if let refreshToken = sessionController.session?.refreshToken {
                 do {
                     let newSession = try await apiClient.refreshAccessToken(refreshToken)
                     sessionController.apply(session: newSession)
-                    // 新しいトークンで再度取得
+                    // Fetch accounts again using the refreshed token
                     accounts = try await apiClient.fetchAccounts(accessToken: newSession.accessToken)
                 } catch {
                     sessionController.clearSession()

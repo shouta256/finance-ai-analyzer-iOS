@@ -8,6 +8,31 @@ final class RemoteAIService: AIService {
     private let encoder: JSONEncoder
     private let logger: Logger
     private var conversationId: UUID?
+    private static let monthFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        formatter.dateFormat = "yyyy-MM"
+        return formatter
+    }()
+
+    private func endpoint(_ path: String) -> URL {
+        configuration.baseURL.appending(path: path)
+    }
+
+    private func summaryURL(for month: Date, generateAi: Bool) -> URL {
+        var components = URLComponents(url: endpoint("analytics/summary"), resolvingAgainstBaseURL: false)
+        var queryItems: [URLQueryItem] = [
+            URLQueryItem(name: "month", value: Self.monthFormatter.string(from: month))
+        ]
+
+        if generateAi {
+            queryItems.append(URLQueryItem(name: "generateAi", value: "true"))
+        }
+
+        components?.queryItems = queryItems
+        return components?.url ?? endpoint("analytics/summary")
+    }
 
     init(configuration: AppConfiguration, urlSession: URLSession = .shared) {
         self.configuration = configuration
@@ -46,17 +71,26 @@ final class RemoteAIService: AIService {
         self.encoder = encoder
     }
 
-    func generateSummary(for prompt: String, session: AuthSession) async throws -> AISummary {
-        let url = apiPath("analytics/summary")
+    func generateSummary(for prompt: String, month: Date, regenerate: Bool, session: AuthSession) async throws -> AISummary {
+        let url = summaryURL(for: month, generateAi: regenerate)
         let request = authorizedRequest(url: url, method: "GET", accessToken: session.accessToken)
         let data = try await perform(request: request, expectedStatus: 200)
-        let response = try SummaryEnvelope(data: data)
+        let envelope = try decoder.decode(AnalyticsSummaryEnvelope.self, from: data)
 
-        return AISummary(
-            prompt: response.prompt ?? prompt,
-            response: response.text,
-            generatedAt: response.generatedAt
-        )
+        if let summary = envelope.aiSummary(fallbackPrompt: prompt) {
+            return summary
+        }
+
+        if !regenerate {
+            return try await generateSummary(
+                for: prompt,
+                month: month,
+                regenerate: true,
+                session: session
+            )
+        }
+
+        throw ApiError.decodingFailed
     }
 
     func fetchConversation(
@@ -85,9 +119,10 @@ final class RemoteAIService: AIService {
             let truncateFromMessageId: UUID?
         }
 
-        let url = apiPath("ai/chat")
+        let url = endpoint("ai/chat")
         var request = authorizedRequest(url: url, method: "POST", accessToken: session.accessToken)
         request.addValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.addValue(UUID().uuidString, forHTTPHeaderField: "Idempotency-Key")
         request.httpBody = try encoder.encode(
             Payload(
                 conversationId: conversationId ?? self.conversationId,
@@ -105,15 +140,15 @@ final class RemoteAIService: AIService {
 
     private func chatURL(conversationId: UUID?) -> URL {
         guard let conversationId else {
-            return apiPath("ai/chat")
+            return endpoint("ai/chat")
         }
 
         var components = URLComponents(
-            url: apiPath("ai/chat"),
+            url: endpoint("ai/chat"),
             resolvingAgainstBaseURL: false
         )
         components?.queryItems = [URLQueryItem(name: "conversationId", value: conversationId.uuidString)]
-        return components?.url ?? apiPath("ai/chat")
+        return components?.url ?? endpoint("ai/chat")
     }
 
     private func parseConversation(from response: ChatResponse) throws -> AIChatConversation {
@@ -137,12 +172,6 @@ final class RemoteAIService: AIService {
         return request
     }
 
-    private func apiPath(_ path: String) -> URL {
-        configuration.baseURL
-            .appending(path: "api")
-            .appending(path: path)
-    }
-
     private func perform(request: URLRequest, expectedStatus: Int) async throws -> Data {
         do {
             let (data, response) = try await urlSession.data(for: request)
@@ -162,6 +191,12 @@ final class RemoteAIService: AIService {
                     throw ApiError.invalidCredentials
                 case 401:
                     throw ApiError.unauthorized
+                case 403:
+                    throw ApiError.forbidden
+                case 404:
+                    throw ApiError.notFound
+                case 429:
+                    throw ApiError.rateLimited
                 case 500...599:
                     throw ApiError.unreachable
                 default:
@@ -205,74 +240,6 @@ private extension RemoteAIService {
         let createdAt: Date?
     }
 
-    struct SummaryEnvelope {
-        let prompt: String?
-        let text: String
-        let generatedAt: Date
-
-        init(data: Data) throws {
-            guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-                throw ApiError.decodingFailed
-            }
-
-            prompt = json["prompt"] as? String
-                ?? json["title"] as? String
-                ?? json["period"] as? String
-
-            if let summary = SummaryEnvelope.extractSummaryText(from: json) {
-                text = summary
-            } else {
-                throw ApiError.decodingFailed
-            }
-
-            generatedAt = SummaryEnvelope.extractDate(from: json) ?? Date()
-        }
-
-        private static func extractSummaryText(from json: [String: Any]) -> String? {
-            let candidates = [
-                "summary",
-                "text",
-                "message",
-                "body",
-                "content",
-                "insight",
-                "description"
-            ]
-
-            for key in candidates {
-                if let value = json[key] as? String, !value.isEmpty {
-                    return value
-                }
-            }
-
-            if let highlights = json["highlights"] as? [String], !highlights.isEmpty {
-                return highlights.joined(separator: "\n")
-            }
-
-            return nil
-        }
-
-        private static func extractDate(from json: [String: Any]) -> Date? {
-            let formatterWithFractions = ISO8601DateFormatter.withFractionalSeconds
-            let formatter = ISO8601DateFormatter.withoutFractionalSeconds
-
-            let candidates = [
-                json["generatedAt"] as? String,
-                json["updatedAt"] as? String,
-                json["createdAt"] as? String,
-                json["timestamp"] as? String
-            ]
-
-            for candidate in candidates {
-                guard let value = candidate else { continue }
-                if let date = formatterWithFractions.date(from: value) ?? formatter.date(from: value) {
-                    return date
-                }
-            }
-
-            return nil
-        }
-    }
 }
 
 private extension AIChatMessage {

@@ -77,8 +77,8 @@
     <key>CognitoRedirectURI</key>
     <string>safepocket://auth/callback</string>
     <key>CognitoScopes</key>
-    <string>openid email phone</string>
+    <string>openid email profile</string>
     <key>ApiBaseURL</key>
-    <string>https://api.shota256.me</string>
+    <string>https://pj7degbcig.execute-api.us-east-1.amazonaws.com/prod</string>
 </dict>
 </plist>

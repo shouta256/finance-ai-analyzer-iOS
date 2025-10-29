@@ -95,7 +95,7 @@ private struct AuthenticatedHomeView: View {
                         sessionController: sessionController
                     ),
                     summaryViewModel: AISummaryViewModel(
-                        prompt: "何に一番お金使ってる？",
+                        prompt: "Where am I spending the most?",
                         aiService: aiService,
                         sessionController: sessionController
                     )

@@ -9,22 +9,36 @@ struct AIChatView: View {
     }
 
     var body: some View {
-        VStack(spacing: 16) {
-            header
-
+        VStack(spacing: 20) {
             content
 
             inputBar
         }
-        .padding(20)
-        .background(Color(.systemGroupedBackground).ignoresSafeArea())
-        .navigationTitle("AI Chat Assistant")
-        .navigationBarTitleDisplayMode(.large)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
+        .background(
+            LinearGradient(
+                colors: [
+                    Color(.secondarySystemGroupedBackground),
+                    Color(.systemBackground)
+                ],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+            .ignoresSafeArea()
+        )
+        .scrollDismissesKeyboard(.interactively)
+        .navigationTitle("AI Chat")
+        .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
-                Button("Retry") {
+                Button {
                     Task { await viewModel.retry() }
+                } label: {
+                    Image(systemName: "arrow.clockwise")
+                        .imageScale(.medium)
                 }
+                .accessibilityLabel("Retry loading messages")
                 .disabled(viewModel.isLoadingHistory)
             }
         }
@@ -33,23 +47,17 @@ struct AIChatView: View {
         }
     }
 
-    private var header: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("自然言語で質問してください。SafepocketのAIが最新の支出データから回答を生成します。")
-                .font(.title3.weight(.semibold))
-
-            Text("支出データからの洞察や過去のアドバイスを会話形式で確認できます。")
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-    }
 
     private var content: some View {
         Group {
             if viewModel.isLoadingHistory && viewModel.messages.isEmpty {
-                ProgressView("Connecting…")
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+                VStack(spacing: 12) {
+                    ProgressView()
+                    Text("Connecting to the assistant…")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
             } else if let errorMessage = viewModel.errorMessage, viewModel.messages.isEmpty {
                 VStack(spacing: 12) {
                     Image(systemName: "exclamationmark.triangle.fill")
@@ -57,6 +65,7 @@ struct AIChatView: View {
                         .foregroundStyle(.orange)
                     Text(errorMessage)
                         .font(.subheadline)
+                        .multilineTextAlignment(.center)
                     Button("Try Again") {
                         Task { await viewModel.retry() }
                     }
@@ -82,20 +91,20 @@ struct AIChatView: View {
                 Text("The AI is writing a reply…")
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 8)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 6)
                     .background(
-                        RoundedRectangle(cornerRadius: 12, style: .continuous)
-                            .fill(Color(.systemBackground).opacity(0.9))
+                        Capsule(style: .continuous)
+                            .fill(Color(.systemBackground).opacity(0.95))
                     )
-                    .padding(.bottom, 8)
-                    .padding(.leading, 16)
+                    .padding(.bottom, 6)
+                    .padding(.leading, 12)
             }
         }
     }
 
     private var inputBar: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 10) {
             if viewModel.editingMessage != nil {
                 HStack(spacing: 8) {
                     Label("Editing previous message", systemImage: "pencil")
@@ -115,30 +124,37 @@ struct AIChatView: View {
                     .foregroundStyle(.red)
             }
 
-            TextField(
-                "Example: How much did I spend on dining last month?",
-                text: $viewModel.inputText,
-                axis: .vertical
-            )
-            .focused($isInputFocused)
-            .textFieldStyle(.roundedBorder)
-            .lineLimit(1...4)
+            HStack(alignment: .bottom, spacing: 10) {
+                TextField(
+                    "Example: How much did I spend on dining last month?",
+                    text: $viewModel.inputText,
+                    axis: .vertical
+                )
+                .focused($isInputFocused)
+                .textFieldStyle(.roundedBorder)
+                .lineLimit(1...4)
 
-            HStack(spacing: 12) {
-                Spacer()
                 if viewModel.isSending {
                     ProgressView()
+                        .controlSize(.small)
                 }
-                Button("Send") {
+
+                Button {
                     Task {
                         await viewModel.sendCurrentMessage()
                         if !viewModel.isSending {
                             isInputFocused = false
                         }
                     }
+                } label: {
+                    Image(systemName: "paperplane.fill")
+                        .font(.system(size: 16, weight: .semibold))
+                        .padding(8)
                 }
                 .buttonStyle(.borderedProminent)
                 .tint(.indigo)
+                .clipShape(Circle())
+                .accessibilityLabel("Send message")
                 .disabled(
                     viewModel.isSending ||
                     viewModel.inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
@@ -155,8 +171,8 @@ private struct ChatMessagesList: View {
 
     var body: some View {
         ScrollViewReader { proxy in
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: 12) {
+            ScrollView(showsIndicators: false) {
+                LazyVStack(alignment: .leading, spacing: 14) {
                     ForEach(messages) { message in
                         ChatMessageBubble(
                             message: message,
@@ -169,13 +185,8 @@ private struct ChatMessagesList: View {
                             }
                     }
                 }
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 8)
+                .padding(.vertical, 12)
             }
-            .background(
-                RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .fill(Color(.systemBackground))
-            )
             .onChange(of: messages.last?.id) { id in
                 guard let id else { return }
                 DispatchQueue.main.async {
@@ -212,7 +223,7 @@ private struct ChatMessageBubble: View {
         .padding(.horizontal, 12)
         .overlay(
             RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .strokeBorder(Color.indigo, lineWidth: isEditing && message.role == .user ? 1.5 : 0)
+                .strokeBorder(Color.indigo.opacity(0.4), lineWidth: isEditing && message.role == .user ? 1.5 : 0)
                 .opacity(isEditing && message.role == .user ? 1 : 0)
         )
     }
@@ -223,9 +234,13 @@ private struct ChatMessageBubble: View {
             Text(message.content)
                 .font(.subheadline)
                 .foregroundStyle(foreground)
-                .padding(.horizontal, 12)
-                .padding(.vertical, 10)
-                .background(tint, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .padding(.horizontal, 14)
+                .padding(.vertical, 12)
+                .background(
+                    RoundedRectangle(cornerRadius: 16, style: .continuous)
+                        .fill(tint)
+                        .shadow(color: tint.opacity(0.25), radius: 6, x: 0, y: 2)
+                )
 
             Text(message.createdAt, format: Date.FormatStyle()
                 .hour(.twoDigits(amPM: .wide))
@@ -241,7 +256,12 @@ private struct ChatMessageBubble: View {
             .scaledToFit()
             .frame(width: 24, height: 24)
             .foregroundStyle(message.role == .assistant ? Color.indigo : Color.accentColor)
-            .padding(4)
+            .padding(6)
+            .background(
+                Circle()
+                    .fill(Color(.systemBackground))
+                    .shadow(color: Color.black.opacity(0.08), radius: 4, x: 0, y: 2)
+            )
     }
 }
 
