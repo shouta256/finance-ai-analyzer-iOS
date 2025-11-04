@@ -3,7 +3,7 @@ import Foundation
 struct Account: Identifiable, Codable, Hashable {
     let id: String
     let name: String
-    let institution: String
+    let institution: String  // bankName から変更
     let type: String?
     let balance: Decimal
     let currency: String

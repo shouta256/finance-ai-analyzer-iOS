@@ -60,6 +60,17 @@ struct DashboardSnapshot: Equatable {
     let monthlyHighlight: MonthlyHighlight?
     let anomalyAlerts: [AnomalyAlert]
     let recentTransactions: [RecentTransaction]
+    let netTrend: [NetTrendPoint]
+
+    struct NetTrendPoint: Identifiable, Equatable {
+        let id = UUID()
+        let date: Date
+        let net: Decimal
+
+        var netValue: Double {
+            NSDecimalNumber(decimal: net).doubleValue
+        }
+    }
 }
 
 extension DashboardSnapshot {
@@ -146,6 +157,14 @@ extension DashboardSnapshot {
                     postedAt: Date(timeIntervalSince1970: 1_756_560_000),
                     currencyCode: currency
                 )
+            ],
+            netTrend: [
+                NetTrendPoint(date: Date(timeIntervalSince1970: 1_756_560_000), net: -120),
+                NetTrendPoint(date: Date(timeIntervalSince1970: 1_756_646_400), net: -320.45),
+                NetTrendPoint(date: Date(timeIntervalSince1970: 1_756_732_800), net: -190.32),
+                NetTrendPoint(date: Date(timeIntervalSince1970: 1_756_819_200), net: -40.12),
+                NetTrendPoint(date: Date(timeIntervalSince1970: 1_756_905_600), net: -118.89),
+                NetTrendPoint(date: Date(timeIntervalSince1970: 1_756_992_000), net: 45.22)
             ]
         )
     }()
