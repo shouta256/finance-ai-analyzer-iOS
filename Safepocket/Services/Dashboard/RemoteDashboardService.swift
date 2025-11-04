@@ -68,26 +68,32 @@ struct RemoteDashboardService: DashboardService {
 
         let data = try await perform(request: request, expectedStatus: 200)
         let response = try decoder.decode(AnalyticsSummaryEnvelope.self, from: data)
-        var snapshot = response.dashboardSnapshot
+        let baseSnapshot = response.dashboardSnapshot
+        let transactionsPayload = try? await fetchTransactions(
+            session: session,
+            month: month,
+            limit: 200
+        )
 
-        if snapshot.recentTransactions.isEmpty {
-            let recent = try await fetchRecentTransactions(
-                session: session,
-                month: month,
-                limit: 12
-            )
+        let sortedTransactions = transactionsPayload?.transactions.sorted(by: { lhs, rhs in
+            lhs.postedAt > rhs.postedAt
+        }) ?? []
 
-            snapshot = DashboardSnapshot(
-                summary: snapshot.summary,
-                categories: snapshot.categories,
-                merchants: snapshot.merchants,
-                monthlyHighlight: snapshot.monthlyHighlight,
-                anomalyAlerts: snapshot.anomalyAlerts,
-                recentTransactions: recent
-            )
-        }
+        let recentTransactions = sortedTransactions.isEmpty
+            ? baseSnapshot.recentTransactions
+            : Array(sortedTransactions.prefix(12)).map(\.snapshot)
 
-        return snapshot
+        let netTrendPoints = buildNetTrend(from: sortedTransactions)
+
+        return DashboardSnapshot(
+            summary: baseSnapshot.summary,
+            categories: baseSnapshot.categories,
+            merchants: baseSnapshot.merchants,
+            monthlyHighlight: baseSnapshot.monthlyHighlight,
+            anomalyAlerts: baseSnapshot.anomalyAlerts,
+            recentTransactions: recentTransactions,
+            netTrend: netTrendPoints
+        )
     }
 
     private func perform(request: URLRequest, expectedStatus: Int) async throws -> Data {
@@ -143,11 +149,11 @@ struct RemoteDashboardService: DashboardService {
         logger.error("[HTTP \(statusCode)] \(request.httpMethod ?? "") \(request.url?.absoluteString ?? "-"): \(body, privacy: .public)")
     }
 
-    private func fetchRecentTransactions(
+    private func fetchTransactions(
         session: AuthSession,
         month: Date,
         limit: Int
-    ) async throws -> [DashboardSnapshot.RecentTransaction] {
+    ) async throws -> TransactionsEnvelope {
         var components = URLComponents(url: endpoint("transactions"), resolvingAgainstBaseURL: false)
         var queryItems = [
             URLQueryItem(name: "month", value: Self.monthFormatter.string(from: month)),
@@ -165,8 +171,40 @@ struct RemoteDashboardService: DashboardService {
         request.addValue(UUID().uuidString, forHTTPHeaderField: configuration.traceHeaderName)
 
         let data = try await perform(request: request, expectedStatus: 200)
-        let response = try decoder.decode(TransactionsEnvelope.self, from: data)
-        return response.transactions.map(\.snapshot)
+        return try decoder.decode(TransactionsEnvelope.self, from: data)
+    }
+
+    private func buildNetTrend(from transactions: [TransactionsEnvelope.Transaction]) -> [DashboardSnapshot.NetTrendPoint] {
+        guard !transactions.isEmpty else { return [] }
+
+        var totalsByDay: [Date: Decimal] = [:]
+        let calendar = Calendar(identifier: .gregorian)
+
+        for transaction in transactions {
+            let day = calendar.startOfDay(for: transaction.postedAt)
+            let current = totalsByDay[day] ?? 0
+            totalsByDay[day] = current + transaction.amount
+        }
+
+        let sortedDays = totalsByDay.keys.sorted()
+        guard !sortedDays.isEmpty else { return [] }
+
+        var points: [DashboardSnapshot.NetTrendPoint] = sortedDays.map { date in
+            DashboardSnapshot.NetTrendPoint(
+                date: date,
+                net: totalsByDay[date] ?? 0
+            )
+        }
+
+        if points.count == 1,
+           let previousDay = calendar.date(byAdding: .day, value: -1, to: points[0].date) {
+            points.insert(
+                DashboardSnapshot.NetTrendPoint(date: previousDay, net: 0),
+                at: 0
+            )
+        }
+
+        return points
     }
 }
 
@@ -219,6 +257,8 @@ private struct TransactionsEnvelope: Decodable {
             case postedAt
             case date
             case authorizedDate
+            case occurredAt
+            case occurredOn
             case currencyCode
             case currency
         }
@@ -255,15 +295,7 @@ private struct TransactionsEnvelope: Decodable {
                 self.status = "posted"
             }
 
-            if let postedAt = try container.decodeIfPresent(Date.self, forKey: .postedAt) {
-                self.postedAt = postedAt
-            } else if let postedAt = try container.decodeIfPresent(Date.self, forKey: .date) {
-                self.postedAt = postedAt
-            } else if let postedAt = try container.decodeIfPresent(Date.self, forKey: .authorizedDate) {
-                self.postedAt = postedAt
-            } else {
-                self.postedAt = Date()
-            }
+            self.postedAt = try Self.resolvePostedDate(from: container)
 
             if let code = try container.decodeIfPresent(String.self, forKey: .currencyCode) {
                 currencyCode = code
@@ -272,6 +304,45 @@ private struct TransactionsEnvelope: Decodable {
             } else {
                 currencyCode = Locale.current.currency?.identifier ?? "USD"
             }
+        }
+
+        private static func resolvePostedDate(from container: KeyedDecodingContainer<CodingKeys>) throws -> Date {
+            if let date = try container.decodeIfPresent(Date.self, forKey: .postedAt) {
+                return date
+            }
+            if let date = try container.decodeIfPresent(Date.self, forKey: .date) {
+                return date
+            }
+            if let date = try container.decodeIfPresent(Date.self, forKey: .authorizedDate) {
+                return date
+            }
+            if let date = try container.decodeIfPresent(Date.self, forKey: .occurredAt) {
+                return date
+            }
+            if let date = try container.decodeIfPresent(Date.self, forKey: .occurredOn) {
+                return date
+            }
+
+            let rawString: String?
+            if let posted = try? container.decodeIfPresent(String.self, forKey: .postedAt) {
+                rawString = posted
+            } else if let date = try? container.decodeIfPresent(String.self, forKey: .date) {
+                rawString = date
+            } else if let occurred = try? container.decodeIfPresent(String.self, forKey: .occurredAt) {
+                rawString = occurred
+            } else if let occurredOn = try? container.decodeIfPresent(String.self, forKey: .occurredOn) {
+                rawString = occurredOn
+            } else {
+                rawString = nil
+            }
+
+            if let rawString,
+               let parsed = ISO8601DateFormatter.withFractionalSeconds.date(from: rawString)
+                    ?? ISO8601DateFormatter.withoutFractionalSeconds.date(from: rawString) {
+                return parsed
+            }
+
+            return Date()
         }
 
         var snapshot: DashboardSnapshot.RecentTransaction {

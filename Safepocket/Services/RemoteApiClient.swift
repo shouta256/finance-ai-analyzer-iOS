@@ -23,10 +23,6 @@ struct RemoteApiClient: ApiClient {
 
     private let logger = Logger(subsystem: Bundle.main.bundleIdentifier ?? "Safepocket", category: "RemoteApiClient")
 
-    private func endpoint(_ path: String) -> URL {
-        configuration.baseURL.appending(path: path)
-    }
-
     init(configuration: AppConfiguration, urlSession: URLSession = .shared) {
         self.configuration = configuration
         self.urlSession = urlSession
@@ -58,7 +54,7 @@ struct RemoteApiClient: ApiClient {
 
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601
-        // The backend expects camelCase keys, so we keep the default encoding strategy.
+        // Note: バックエンドはcamelCaseを期待しているため、keyEncodingStrategyは設定しない
         self.encoder = encoder
     }
 
@@ -78,14 +74,12 @@ struct RemoteApiClient: ApiClient {
             let userId: String?
         }
 
-        let url = endpoint("auth/token")
+        let url = configuration.baseURL.appending(path: "api/auth/token")
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.addValue("application/json", forHTTPHeaderField: "Content-Type")
         request.addValue("application/json", forHTTPHeaderField: "Accept")
         request.addValue(UUID().uuidString, forHTTPHeaderField: configuration.traceHeaderName)
-        request.addValue(UUID().uuidString, forHTTPHeaderField: "Idempotency-Key")
-        logger.debug("POST /auth/token with authorization_code grant.")
         
         let payload = Payload(
             grantType: "authorization_code",
@@ -96,10 +90,18 @@ struct RemoteApiClient: ApiClient {
         let body = try encoder.encode(payload)
         request.httpBody = body
         
+        #if DEBUG
+        if let jsonString = String(data: body, encoding: .utf8) {
+            print("[HTTP] POST /api/auth/token body: \(jsonString)")
+        }
+        #endif
+
         let data = try await perform(request: request, expectingStatus: 200)
         let response = try decoder.decode(Response.self, from: data)
         let expiresAt = Date().addingTimeInterval(response.expiresIn)
-        logger.debug("Received tokens from /auth/token (authorization_code). expiresIn: \(response.expiresIn, privacy: .public)s")
+    #if DEBUG
+    print("[HTTP] /api/auth/token success. Access token received (hidden). expiresIn=\(response.expiresIn)s")
+    #endif
         return AuthSession(
             accessToken: response.accessToken,
             refreshToken: response.refreshToken,
@@ -124,14 +126,12 @@ struct RemoteApiClient: ApiClient {
             let userId: String?
         }
 
-        let url = endpoint("auth/token")
+        let url = configuration.baseURL.appending(path: "api/auth/token")
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.addValue("application/json", forHTTPHeaderField: "Content-Type")
         request.addValue("application/json", forHTTPHeaderField: "Accept")
         request.addValue(UUID().uuidString, forHTTPHeaderField: configuration.traceHeaderName)
-        request.addValue(UUID().uuidString, forHTTPHeaderField: "Idempotency-Key")
-        logger.debug("POST /auth/token with refresh_token grant.")
         
         let payload = Payload(
             grantType: "refresh_token",
@@ -140,13 +140,21 @@ struct RemoteApiClient: ApiClient {
         let body = try encoder.encode(payload)
         request.httpBody = body
         
+        #if DEBUG
+        if let jsonString = String(data: body, encoding: .utf8) {
+            print("[HTTP] POST /api/auth/token (refresh) body: \(jsonString)")
+        }
+        #endif
+
         let data = try await perform(request: request, expectingStatus: 200)
         let response = try decoder.decode(Response.self, from: data)
         let expiresAt = Date().addingTimeInterval(response.expiresIn)
-        logger.debug("Received tokens from /auth/token (refresh_token). expiresIn: \(response.expiresIn, privacy: .public)s")
+        #if DEBUG
+        print("[HTTP] /api/auth/token (refresh) success. New access token received. expiresIn=\(response.expiresIn)s")
+        #endif
         return AuthSession(
             accessToken: response.accessToken,
-            refreshToken: response.refreshToken ?? refreshToken, // Keep the previous refresh token when the response omits a new one
+            refreshToken: response.refreshToken ?? refreshToken, // 新しいリフレッシュトークンがなければ既存のものを保持
             idToken: response.idToken,
             expiresAt: expiresAt,
             userId: response.userId,
@@ -155,7 +163,7 @@ struct RemoteApiClient: ApiClient {
     }
 
     func fetchAccounts(accessToken: String) async throws -> [Account] {
-        let url = endpoint("accounts")
+        let url = configuration.baseURL.appending(path: "api/accounts")
         var request = URLRequest(url: url)
         request.httpMethod = "GET"
         request.addValue("application/json", forHTTPHeaderField: "Accept")
@@ -163,13 +171,27 @@ struct RemoteApiClient: ApiClient {
         request.addValue(UUID().uuidString, forHTTPHeaderField: configuration.traceHeaderName)
 
         let data = try await perform(request: request, expectingStatus: 200)
-
+        
+        #if DEBUG
+        if let jsonString = String(data: data, encoding: .utf8) {
+            print("[HTTP] GET /api/accounts raw response: \(jsonString)")
+        } else {
+            print("[HTTP] GET /api/accounts - unable to convert response to string")
+        }
+        #endif
+        
         do {
             let response = try decoder.decode(AccountsListResponse.self, from: data)
-            logger.debug("Fetched \(response.accounts.count, privacy: .public) accounts from /accounts.")
+            
+            #if DEBUG
+            print("[HTTP] Decoded \(response.accounts.count) accounts from AccountsListResponse")
+            #endif
+            
             return response.accounts
         } catch {
-            logger.error("Failed to decode AccountsListResponse: \(error.localizedDescription, privacy: .public)")
+            #if DEBUG
+            print("[HTTP] Failed to decode AccountsListResponse: \(error)")
+            #endif
             throw error
         }
     }
@@ -181,7 +203,9 @@ struct RemoteApiClient: ApiClient {
                 throw ApiError.unknown
             }
 
-            logger.debug("\(request.httpMethod ?? "") \(request.url?.absoluteString ?? "-") status=\(httpResponse.statusCode, privacy: .public)")
+            #if DEBUG
+            print("[HTTP] \(request.httpMethod ?? "") \(request.url?.absoluteString ?? "-") status=\(httpResponse.statusCode)")
+            #endif
 
             guard httpResponse.statusCode == status else {
                 logApiError(
@@ -195,12 +219,6 @@ struct RemoteApiClient: ApiClient {
                     throw ApiError.invalidCredentials
                 case 401:
                     throw ApiError.unauthorized
-                case 403:
-                    throw ApiError.forbidden
-                case 404:
-                    throw ApiError.notFound
-                case 429:
-                    throw ApiError.rateLimited
                 case 500...599:
                     throw ApiError.unreachable
                 default:
@@ -227,12 +245,21 @@ struct RemoteApiClient: ApiClient {
         if let errorResponse = try? decoder.decode(ApiErrorResponse.self, from: data) {
             let message = "[HTTP \(statusCode)] \(request.httpMethod ?? "") \(request.url?.absoluteString ?? "-" )\ncode: \(errorResponse.error.code)\nmessage: \(errorResponse.error.message)\ntraceId: \(errorResponse.traceId)"
             logger.error("\(message, privacy: .public)")
+            #if DEBUG
+            print(message)
+            #endif
         } else if let body = String(data: data, encoding: .utf8), !body.isEmpty {
             let message = "[HTTP \(statusCode)] \(request.httpMethod ?? "") \(request.url?.absoluteString ?? "-")\nraw body: \(body)"
             logger.error("\(message, privacy: .public)")
+            #if DEBUG
+            print(message)
+            #endif
         } else {
             let message = "[HTTP \(statusCode)] \(request.httpMethod ?? "") \(request.url?.absoluteString ?? "-") (no readable body)"
             logger.error("\(message, privacy: .public)")
+            #if DEBUG
+            print(message)
+            #endif
         }
     }
 }

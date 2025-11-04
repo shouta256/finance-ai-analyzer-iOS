@@ -121,7 +121,8 @@ struct AnalyticsSummaryEnvelope: Decodable {
             merchants: merchants.map(\.snapshot),
             monthlyHighlight: monthlyHighlight?.snapshot,
             anomalyAlerts: anomalyAlerts.map(\.snapshot),
-            recentTransactions: recentTransactions.map(\.snapshot)
+            recentTransactions: recentTransactions.map(\.snapshot),
+            netTrend: []
         )
     }
 
