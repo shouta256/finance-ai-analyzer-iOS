@@ -1,4 +1,5 @@
 import SwiftUI
+import Charts
 #if canImport(UIKit)
 import UIKit
 #endif
@@ -229,6 +230,22 @@ struct DashboardView: View {
         return CurrencyFormatter.string(from: summary.net, currencyCode: summary.currencyCode)
     }
 
+    private func spendingHealthScore(for summary: DashboardSnapshot.Summary) -> Int {
+        let income = NSDecimalNumber(decimal: summary.income).doubleValue
+        let expenses = abs(NSDecimalNumber(decimal: summary.expenses).doubleValue)
+
+        if income <= 0 {
+            if expenses == 0 {
+                return 100
+            }
+            return max(10, 60 - Int(min(expenses / 100, 40)))
+        }
+
+        let ratio = min(max(expenses / income, 0), 2)
+        let rawScore = Int(round((1 - ratio) * 100))
+        return max(0, min(100, rawScore))
+    }
+
     private func shiftMonth(by offset: Int) {
         guard offset != 0 else { return }
         Task {
@@ -306,7 +323,24 @@ struct DashboardView: View {
     }()
 
     private func insightsSection(snapshot: DashboardSnapshot) -> some View {
-        AdaptiveGrid(minimumWidth: 280) {
+        AdaptiveGrid(minimumWidth: 320) {
+            DashboardCard {
+                VStack(alignment: .leading, spacing: 16) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Net Trend")
+                            .font(.headline)
+                        Text("Monthly net movement based on the selected period.")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
+
+                    NetTrendCard(
+                        points: snapshot.netTrend,
+                        currencyCode: snapshot.summary.currencyCode
+                    )
+                }
+            }
+
             DashboardCard {
                 VStack(alignment: .leading, spacing: 16) {
                     VStack(alignment: .leading, spacing: 4) {
@@ -322,11 +356,13 @@ struct DashboardView: View {
                             .font(.subheadline)
                             .foregroundStyle(.secondary)
                     } else {
-                        VStack(alignment: .leading, spacing: 12) {
-                            ForEach(snapshot.categories) { category in
-                                CategorySpendRow(category: category, currencyCode: snapshot.summary.currencyCode)
-                            }
-                        }
+                        let score = spendingHealthScore(for: snapshot.summary)
+                        CategorySpendingCard(
+                            categories: snapshot.categories,
+                            summary: snapshot.summary,
+                            score: score,
+                            scoreLabel: viewModel.monthTitle
+                        )
                     }
                 }
             }
@@ -346,11 +382,10 @@ struct DashboardView: View {
                             .font(.subheadline)
                             .foregroundStyle(.secondary)
                     } else {
-                        VStack(alignment: .leading, spacing: 12) {
-                            ForEach(snapshot.merchants) { merchant in
-                                MerchantRow(merchant: merchant, currencyCode: snapshot.summary.currencyCode)
-                            }
-                        }
+                        MerchantActivityCard(
+                            merchants: snapshot.merchants,
+                            currencyCode: snapshot.summary.currencyCode
+                        )
                     }
                 }
             }
@@ -558,6 +593,289 @@ private struct AdaptiveGrid<Content: View>: View {
     }
 }
 
+private struct CategorySpendingCard: View {
+    let categories: [DashboardSnapshot.CategorySpend]
+    let summary: DashboardSnapshot.Summary
+    let score: Int
+    let scoreLabel: String
+
+    private struct Segment: Identifiable, Equatable {
+        let id = UUID()
+        let category: DashboardSnapshot.CategorySpend
+        let start: Double
+        let end: Double
+        let color: Color
+    }
+
+    private var palette: [Color] {
+        [
+            Color(red: 56/255, green: 189/255, blue: 248/255), // sky-400
+            Color(red: 99/255, green: 102/255, blue: 241/255), // indigo-500
+            Color(red: 129/255, green: 140/255, blue: 248/255), // indigo-400
+            Color(red: 167/255, green: 139/255, blue: 250/255), // violet-400
+            Color(red: 192/255, green: 132/255, blue: 252/255), // purple-400
+            Color(red: 232/255, green: 121/255, blue: 249/255), // fuchsia-400
+            Color(red: 244/255, green: 114/255, blue: 182/255)  // pink-400
+        ]
+    }
+
+    private var segments: [Segment] {
+        let amounts = categories.map { max(abs(NSDecimalNumber(decimal: $0.amount).doubleValue), 0.0) }
+        let total = amounts.reduce(0, +)
+        guard total > 0 else { return [] }
+
+        var start: Double = 0
+        return categories.enumerated().map { index, category in
+            let value = amounts[index] / total
+            let end = start + value
+            defer { start = end }
+            return Segment(
+                category: category,
+                start: start,
+                end: min(end, 1),
+                color: palette[index % palette.count]
+            )
+        }
+    }
+
+    private var scoreColor: Color {
+        switch score {
+        case 70...:
+            return Color(red: 22/255, green: 163/255, blue: 74/255)
+        case 40..<70:
+            return Color(red: 245/255, green: 158/255, blue: 11/255)
+        default:
+            return Color(red: 220/255, green: 38/255, blue: 38/255)
+        }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 20) {
+            if segments.isEmpty {
+                Text("Link more accounts to unlock category insights.")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            } else {
+                GeometryReader { geometry in
+                    let diameter = min(geometry.size.width, geometry.size.height)
+                    let lineWidth = max(min(diameter * 0.16, 26), 14)
+                    let segmentGap = 0.008
+
+                    ZStack {
+                        ForEach(segments) { segment in
+                            let span = segment.end - segment.start
+                            let adjustedStart = span > segmentGap
+                                ? segment.start + segmentGap / 2
+                                : segment.start
+                            let adjustedEnd = span > segmentGap
+                                ? segment.end - segmentGap / 2
+                                : segment.end
+
+                            if adjustedEnd > adjustedStart {
+                                Circle()
+                                    .trim(from: adjustedStart, to: adjustedEnd)
+                                    .stroke(
+                                        segment.color,
+                                        style: StrokeStyle(lineWidth: lineWidth, lineCap: .round)
+                                    )
+                                    .rotationEffect(.degrees(-90))
+                            }
+                        }
+
+                        VStack(spacing: 4) {
+                            Text("\(score)")
+                                .font(.system(size: 34, weight: .bold, design: .rounded))
+                                .foregroundStyle(scoreColor)
+                                .contentTransition(.numericText())
+                            Text(scoreLabel)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    .frame(width: diameter, height: diameter)
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityLabel("Spending score \(score) out of 100 for \(scoreLabel)")
+                }
+                .frame(height: 200)
+            }
+
+            VStack(alignment: .leading, spacing: 12) {
+                ForEach(Array(segments.enumerated()), id: \.element.id) { index, segment in
+                    CategoryLegendRow(
+                        color: segment.color,
+                        name: segment.category.name,
+                        amount: segment.category.amount,
+                        percentage: segment.category.percentage,
+                        currencyCode: summary.currencyCode,
+                        showDivider: index < segments.count - 1
+                    )
+                }
+            }
+        }
+        .animation(.easeInOut(duration: 0.32), value: segments)
+    }
+}
+
+private struct NetTrendCard: View {
+    let points: [DashboardSnapshot.NetTrendPoint]
+    let currencyCode: String
+
+    private var orderedPoints: [DashboardSnapshot.NetTrendPoint] {
+        points.sorted { $0.date < $1.date }
+    }
+
+    private var gradient: LinearGradient {
+        LinearGradient(
+            colors: [
+                Color(red: 37/255, green: 99/255, blue: 235/255),
+                Color(red: 168/255, green: 85/255, blue: 247/255),
+                Color(red: 236/255, green: 72/255, blue: 153/255)
+            ],
+            startPoint: .leading,
+            endPoint: .trailing
+        )
+    }
+
+    private var hasTrend: Bool {
+        orderedPoints.count >= 2
+    }
+
+    var body: some View {
+        if !hasTrend {
+            Text("Not enough transaction history yet. Link accounts or expand the date range to see your trend.")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        } else {
+            Chart {
+                let trendPoints = orderedPoints
+
+                ForEach(trendPoints) { point in
+                    AreaMark(
+                        x: .value("Date", point.date),
+                        y: .value("Net", point.netValue)
+                    )
+                    .interpolationMethod(.catmullRom)
+                    .foregroundStyle(gradient.opacity(0.18))
+
+                    LineMark(
+                        x: .value("Date", point.date),
+                        y: .value("Net", point.netValue)
+                    )
+                    .interpolationMethod(.catmullRom)
+                    .lineStyle(StrokeStyle(lineWidth: 5, lineCap: .round))
+                    .foregroundStyle(gradient)
+                }
+
+                RuleMark(y: .value("Zero", 0))
+                    .lineStyle(StrokeStyle(lineWidth: 1, dash: [5, 4]))
+                    .foregroundStyle(Color.primary.opacity(0.12))
+            }
+            .chartXAxis {
+                AxisMarks(values: .automatic(desiredCount: 6)) { value in
+                    AxisGridLine().foregroundStyle(Color.primary.opacity(0.06))
+                    AxisValueLabel {
+                        if let dateValue = value.as(Date.self) {
+                            Text(Self.axisFormatter.string(from: dateValue))
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                }
+            }
+            .chartYAxis(.hidden)
+            .frame(height: 220)
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel("Net trend over the selected period")
+            .accessibilityValue(
+                orderedPoints
+                    .map { "\(Self.axisFormatter.string(from: $0.date)): \(CurrencyFormatter.string(from: $0.net, currencyCode: currencyCode))" }
+                    .joined(separator: ", ")
+            )
+        }
+    }
+
+    private static let axisFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "MMM d"
+        formatter.locale = Locale.autoupdatingCurrent
+        return formatter
+    }()
+}
+
+private struct MerchantActivityCard: View {
+    let merchants: [DashboardSnapshot.MerchantActivity]
+    let currencyCode: String
+
+    struct MerchantEntry: Identifiable {
+        let id = UUID()
+        let name: String
+        let amount: Double
+        let rawAmount: Decimal
+        let count: Int
+        let color: Color
+    }
+
+    private var entries: [MerchantEntry] {
+        let palette: [Color] = [
+            Color(red: 37/255, green: 99/255, blue: 235/255),
+            Color(red: 59/255, green: 130/255, blue: 246/255),
+            Color(red: 99/255, green: 102/255, blue: 241/255),
+            Color(red: 6/255, green: 182/255, blue: 212/255),
+            Color(red: 14/255, green: 165/255, blue: 233/255)
+        ]
+
+        return merchants.enumerated().map { index, merchant in
+            MerchantEntry(
+                name: merchant.name,
+                amount: max(abs(NSDecimalNumber(decimal: merchant.amount).doubleValue), 0),
+                rawAmount: merchant.amount,
+                count: merchant.transactionCount,
+                color: palette[index % palette.count]
+            )
+        }
+    }
+
+    private var maxValue: Double {
+        entries.map(\.amount).max() ?? 0
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            if entries.isEmpty {
+                Text("No merchant activity yet.")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            } else {
+                Chart(entries) { entry in
+                    BarMark(
+                        x: .value("Amount", entry.amount),
+                        y: .value("Merchant", entry.name)
+                    )
+                    .annotation(position: .trailing, alignment: .trailing) {
+                        Text(CurrencyFormatter.string(from: entry.rawAmount, currencyCode: currencyCode))
+                            .font(.caption2.monospacedDigit())
+                            .foregroundStyle(.secondary)
+                    }
+                    .foregroundStyle(entry.color)
+                    .cornerRadius(8)
+                }
+                .chartLegend(.hidden)
+                .chartXAxis(.hidden)
+                .chartYScale(domain: entries.map(\.name))
+                .chartXScale(domain: 0...(maxValue * 1.15 + 0.01))
+                .frame(height: CGFloat(entries.count) * 32 + 36)
+
+                VStack(alignment: .leading, spacing: 10) {
+                    ForEach(entries) { entry in
+                        MerchantLegendRow(entry: entry, currencyCode: currencyCode)
+                    }
+                }
+            }
+        }
+    }
+}
+
 private struct HeroMetricPill: View {
     let title: String
     let value: String
@@ -672,46 +990,75 @@ private struct DashboardSettingsView: View {
     }
 }
 
-private struct CategorySpendRow: View {
-    let category: DashboardSnapshot.CategorySpend
+private struct CategoryLegendRow: View {
+    let color: Color
+    let name: String
+    let amount: Decimal
+    let percentage: Double
     let currencyCode: String
+    let showDivider: Bool
+
+    private var displayName: String {
+        let replaced = name.replacingOccurrences(of: "_", with: " ")
+        return replaced
+            .replacingOccurrences(of: "  ", with: " ")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .localizedCapitalized
+    }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack {
-                Text(category.name)
-                    .font(.subheadline.weight(.semibold))
+        VStack(spacing: 8) {
+            HStack(alignment: .center, spacing: 12) {
+                Circle()
+                    .fill(color)
+                    .frame(width: 16, height: 16)
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(displayName)
+                        .font(.subheadline.weight(.semibold))
+                        .lineLimit(1)
+                    Text(String(format: "%.1f%% of spend", max(percentage, 0) * 100))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
                 Spacer()
-                Text(CurrencyFormatter.string(from: category.amount, currencyCode: currencyCode))
+
+                Text(CurrencyFormatter.string(from: amount, currencyCode: currencyCode))
                     .font(.subheadline.monospacedDigit())
-                    .foregroundStyle(category.amount < 0 ? Color.red : Color.primary)
+                    .foregroundStyle(amount < 0 ? Color.red : Color.primary)
             }
-            ProgressView(value: min(max(category.percentage, 0), 1))
-                .progressViewStyle(LinearProgressViewStyle(tint: .accentColor))
-            Text(String(format: "%.1f%% of spend", category.percentage * 100))
-                .font(.caption)
-                .foregroundStyle(.secondary)
+
+            if showDivider {
+                Divider()
+            }
         }
     }
 }
 
-private struct MerchantRow: View {
-    let merchant: DashboardSnapshot.MerchantActivity
+private struct MerchantLegendRow: View {
+    let entry: MerchantActivityCard.MerchantEntry
     let currencyCode: String
 
     var body: some View {
-        HStack(alignment: .top, spacing: 12) {
-            VStack(alignment: .leading, spacing: 4) {
-                Text(merchant.name)
+        HStack(alignment: .center, spacing: 12) {
+            RoundedRectangle(cornerRadius: 4, style: .continuous)
+                .fill(entry.color)
+                .frame(width: 16, height: 16)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(entry.name)
                     .font(.subheadline.weight(.semibold))
-                Text("\(merchant.transactionCount) \(merchant.transactionCount == 1 ? "transaction" : "transactions")")
+                Text("\(entry.count) \(entry.count == 1 ? "transaction" : "transactions")")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
+
             Spacer()
-            Text(CurrencyFormatter.string(from: merchant.amount, currencyCode: currencyCode))
+
+            Text(CurrencyFormatter.string(from: entry.rawAmount, currencyCode: currencyCode))
                 .font(.subheadline.monospacedDigit())
-                .foregroundStyle(merchant.amount < 0 ? Color.red : Color.primary)
+                .foregroundStyle(entry.rawAmount < 0 ? Color.red : Color.primary)
         }
     }
 }
